@@ -1,1 +1,705 @@
-PLACEHOLDER_WILL_BE_REPLACED
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Multi-PiP Viewer</title>
+<style>
+:root {
+  --bg: #07070b;
+  --surface: #101016;
+  --surface-2: #181822;
+  --surface-3: #222230;
+  --border: #2e2e3c;
+  --accent: #7c6aff;
+  --success: #34d399;
+  --text: #f8f8f8;
+  --muted: #9ca3af;
+  --radius: 14px;
+  --font: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--text); font-family: var(--font); overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100vh; }
+header, .toolbar {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: 0.7rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border); gap: 0.75rem; flex-wrap: wrap;
+}
+.toolbar { border-bottom: none; border-top: 1px solid var(--border); }
+.logo { font-weight: 700; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
+.btn {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 0.45rem 0.85rem; border-radius: 8px; font-size: 0.82rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+}
+.btn:hover { background: var(--surface-3); }
+.btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn-sm { padding: 0.28rem 0.55rem; font-size: 0.75rem; }
+.btn-danger { background: rgba(248,113,113,.12); color: #fca5a5; border-color: rgba(248,113,113,.3); }
+.stage {
+  flex: 1; position: relative; background: #000; overflow: hidden; margin: 0.5rem;
+  border-radius: var(--radius); border: 1px solid var(--border);
+}
+.main-video-wrap { position: absolute; inset: 0; }
+.main-video-wrap video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+body.clean .main-video-wrap video { object-fit: cover; }
+.main-label {
+  position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 0.3rem 0.7rem;
+  border-radius: 6px; font-size: 0.78rem; pointer-events: none; z-index: 2;
+}
+.pip {
+  position: absolute; background: #000; border: 2px solid var(--accent); border-radius: 8px;
+  overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,0.6); min-width: 160px; min-height: 100px;
+  z-index: 5; display: flex; flex-direction: column; user-select: none; touch-action: none;
+}
+.pip.dragging { opacity: 0.92; z-index: 30; }
+.pip-header {
+  background: rgba(12,12,18,0.95); padding: 0.25rem 0.45rem; display: flex; align-items: center;
+  justify-content: space-between; cursor: grab; font-size: 0.72rem; font-weight: 600;
+}
+.pip-header input { background: transparent; border: none; color: #fff; font: inherit; width: 90px; outline: none; }
+.pip-video { flex: 1; width: 100%; object-fit: contain; background: #000; }
+.pip-controls { display: flex; gap: 0.2rem; padding: 0.2rem 0.35rem; background: rgba(0,0,0,0.8); justify-content: flex-end; flex-wrap: wrap; }
+.resize-handle {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 45%, var(--accent) 45%);
+  z-index: 15;
+}
+.empty-hint {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  color: var(--muted); pointer-events: none; padding: 1.5rem;
+}
+.sources-tray { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.source-chip {
+  background: var(--surface-2); border: 1px solid var(--border); padding: 0.25rem 0.55rem;
+  border-radius: 999px; font-size: 0.72rem; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;
+}
+.source-chip.active { border-color: var(--accent); background: rgba(124,106,255,0.15); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; place-items: center; z-index: 200; backdrop-filter: blur(4px);
+}
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.3rem; width: min(480px, 92vw); max-height: 85vh; overflow: auto; }
+.modal h3 { margin: 0 0 1rem; }
+.opt, .setting { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.opt:last-child, .setting:last-child { border-bottom: none; }
+input[type=range] { accent-color: var(--accent); }
+.toast {
+  position: fixed; bottom: 1rem; right: 1rem; background: var(--surface-2); border: 1px solid var(--border);
+  padding: 0.7rem 1rem; border-radius: 8px; z-index: 300; max-width: 320px;
+}
+.hover-overlay {
+  position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.7), transparent 40%);
+  display: flex; align-items: flex-end; justify-content: center; padding: 0.6rem;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 10; gap: 0.4rem;
+}
+.hover-overlay.visible { opacity: 1; pointer-events: auto; }
+.hover-overlay .btn { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.2); }
+.playlist-item { font-size: 0.8rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+body.clean .app > header,
+body.clean .toolbar,
+body.clean .main-label,
+body.clean .pip-header,
+body.clean .pip-controls,
+body.clean .empty-hint { display: none !important; }
+body.clean .stage {
+  position: fixed; inset: 0; margin: 0; border: none; border-radius: 0; z-index: 50;
+}
+body.clean .pip { border-width: 1px; cursor: move; }
+body.clean .pip-video { pointer-events: none; }
+body.clean .hover-overlay { pointer-events: auto; }
+body.clean .resize-handle { opacity: 0.4; width: 22px; height: 22px; }
+body.clean .pip:hover .resize-handle { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">📺 Local Multi-PiP</div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+      <button class="btn" id="settingsBtn">Settings</button>
+      <button class="btn" id="playlistBtn">Playlists</button>
+      <button class="btn" id="cleanBtn">Clean Fullscreen</button>
+      <button class="btn" id="cycleBtn">Cycle Main</button>
+      <button class="btn btn-primary" id="addBtn">+ Capture</button>
+      <button class="btn" id="addVideoBtn">+ Video File</button>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="main-video-wrap">
+      <video id="mainVideo" autoplay playsinline></video>
+      <div class="main-label" id="mainLabel">No source</div>
+    </div>
+    <div class="empty-hint" id="emptyHint">
+      <div>
+        <strong>Local Multi-PiP Viewer</strong><br>
+        Screen captures or local video files / playlists.<br>
+        Clean Fullscreen hides UI for casting.
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="sources-tray" id="tray"></div>
+    <div style="display:flex;gap:0.5rem;align-items:center;font-size:0.78rem;color:var(--muted)">
+      <span id="countLabel">0 / 5</span>
+      <button class="btn btn-sm" id="arrangeBtn">Arrange</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<input type="file" id="fileInput" accept="video/*" multiple style="display:none">
+
+<div class="modal-overlay" id="captureModal">
+  <div class="modal">
+    <h3>New Capture</h3>
+    <div class="opt"><span>Include audio</span><input type="checkbox" id="optAudio" checked></div>
+    <div class="opt"><span>Prefer current tab</span><input type="checkbox" id="optPreferTab"></div>
+    <div style="display:flex;gap:0.6rem;justify-content:flex-end;margin-top:1rem">
+      <button class="btn" id="cancelCapture">Cancel</button>
+      <button class="btn btn-primary" id="confirmCapture">Start</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h3>Settings</h3>
+    <div class="setting">Max sources <input type="range" id="setMax" min="1" max="5" value="5"></div>
+    <div class="setting">PiP default width <input type="range" id="setPipSize" min="160" max="480" value="260"></div>
+    <div class="setting">Snap to grid <input type="checkbox" id="setSnap" checked></div>
+    <div class="setting">Auto-mute non-main <input type="checkbox" id="setAutoMute"></div>
+    <div class="setting">Show labels <input type="checkbox" id="setLabels" checked></div>
+    <div class="setting">Accent color <input type="color" id="setAccent" value="#7c6aff"></div>
+    <div class="setting">Hover hide delay (ms) <input type="range" id="setHideDelay" min="500" max="4000" value="1800"></div>
+    <div style="margin-top:1.1rem;display:flex;justify-content:flex-end">
+      <button class="btn btn-primary" id="closeSettings">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="playlistModal">
+  <div class="modal">
+    <h3>Playlists</h3>
+    <div id="playlistList"></div>
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
+      <button class="btn" id="closePlaylist">Close</button>
+    </div>
+    <p style="font-size:0.75rem;color:var(--muted);margin:0.8rem 0 0">
+      Select multiple video files when adding. Each playlist becomes one source that can loop or advance.
+    </p>
+  </div>
+</div>
+
+<script>
+const stage = document.getElementById('stage');
+const mainVideo = document.getElementById('mainVideo');
+const mainLabel = document.getElementById('mainLabel');
+const emptyHint = document.getElementById('emptyHint');
+const tray = document.getElementById('tray');
+const countLabel = document.getElementById('countLabel');
+const toasts = document.getElementById('toasts');
+const cleanBtn = document.getElementById('cleanBtn');
+const fileInput = document.getElementById('fileInput');
+
+let settings = {
+  max: 5,
+  pipSize: 260,
+  snap: true,
+  autoMute: false,
+  showLabels: true,
+  accent: '#7c6aff',
+  hideDelay: 1800
+};
+
+let sources = [];
+let nextId = 1;
+let currentMainId = null;
+let hideTimers = new Map();
+let playlists = []; // {id, name, files: File[], current: 0, loop: true}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  toasts.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+function updateUI() {
+  countLabel.textContent = sources.length + ' / ' + settings.max;
+  emptyHint.style.display = sources.length ? 'none' : 'grid';
+  tray.innerHTML = '';
+  sources.forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'source-chip' + (s.isMain ? ' active' : '');
+    chip.innerHTML = '<span class="dot"></span>' + s.label;
+    chip.onclick = () => setMain(s.id);
+    tray.appendChild(chip);
+  });
+  document.documentElement.style.setProperty('--accent', settings.accent);
+  renderPlaylistList();
+}
+
+function renderPlaylistList() {
+  const list = document.getElementById('playlistList');
+  list.innerHTML = playlists.length ? '' : '<div style="color:var(--muted);font-size:0.85rem">No playlists yet. Use + Video File and select multiple.</div>';
+  playlists.forEach(pl => {
+    const item = document.createElement('div');
+    item.className = 'playlist-item';
+    item.innerHTML = `<span>${pl.name} (${pl.files.length} videos)</span>
+      <span>
+        <button class="btn btn-sm" data-id="${pl.id}" data-act="play">Play</button>
+        <button class="btn btn-sm" data-id="${pl.id}" data-act="loop">${pl.loop ? 'Loop On' : 'Loop Off'}</button>
+      </span>`;
+    list.appendChild(item);
+  });
+  list.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      const id = +btn.dataset.id;
+      const pl = playlists.find(p => p.id === id);
+      if (!pl) return;
+      if (btn.dataset.act === 'play') addPlaylistSource(pl);
+      if (btn.dataset.act === 'loop') { pl.loop = !pl.loop; renderPlaylistList(); }
+    };
+  });
+}
+
+function getPipStyle(pip) {
+  if (!pip) return null;
+  return { left: pip.style.left, top: pip.style.top, width: pip.style.width, height: pip.style.height };
+}
+function applyPipStyle(pip, style) {
+  if (!pip || !style) return;
+  ['left','top','width','height'].forEach(k => { if (style[k]) pip.style[k] = style[k]; });
+}
+
+function setMain(id) {
+  const source = sources.find(s => s.id === id);
+  if (!source) return;
+
+  let savedStyle = null;
+  if (source.pipEl) {
+    savedStyle = getPipStyle(source.pipEl);
+    source.pipEl.remove();
+    source.pipEl = null;
+  }
+
+  if (currentMainId && currentMainId !== id) {
+    const prev = sources.find(s => s.id === currentMainId);
+    if (prev) makePip(prev, savedStyle);
+  }
+
+  sources.forEach(s => s.isMain = false);
+  source.isMain = true;
+  currentMainId = id;
+
+  if (source.type === 'stream') {
+    mainVideo.srcObject = source.stream;
+    mainVideo.src = '';
+  } else {
+    mainVideo.srcObject = null;
+    mainVideo.src = source.currentUrl || '';
+    mainVideo.loop = source.type === 'file' && !source.playlist && source.loop;
+  }
+  mainLabel.textContent = source.label;
+  mainVideo.muted = source.muted;
+  mainVideo.volume = source.volume;
+  if (source.type === 'file') mainVideo.play().catch(() => {});
+  if (source.type === 'file' && source.playlist) {
+    mainVideo.onended = () => {
+      if (source.loop || source.playlist.current < source.playlist.files.length - 1) {
+        advancePlaylist(source);
+      }
+    };
+  } else {
+    mainVideo.onended = null;
+  }
+
+  if (settings.autoMute) {
+    sources.forEach(s => { if (!s.isMain) setMuted(s.id, true); });
+  }
+  updateUI();
+}
+
+function setMuted(id, muted) {
+  const s = sources.find(x => x.id === id);
+  if (!s) return;
+  s.muted = muted;
+  if (s.type === 'stream') s.stream.getAudioTracks().forEach(t => t.enabled = !muted);
+  if (s.videoEl) s.videoEl.muted = muted;
+  if (s.isMain) mainVideo.muted = muted;
+  if (s.pipEl) {
+    const btn = s.pipEl.querySelector('[data-act="mute"]');
+    if (btn) btn.textContent = muted ? 'Unmute' : 'Mute';
+    const hoverBtn = s.pipEl.querySelector('.hover-mute');
+    if (hoverBtn) hoverBtn.textContent = muted ? 'Unmute' : 'Mute';
+  }
+}
+
+function makePip(source, style) {
+  if (source.pipEl) return;
+  const pip = document.createElement('div');
+  pip.className = 'pip';
+  const w = settings.pipSize;
+  const h = Math.round(w * 0.62);
+  const count = document.querySelectorAll('.pip').length;
+  pip.style.width = w + 'px';
+  pip.style.height = h + 'px';
+  pip.style.left = (16 + (count % 3) * 28) + 'px';
+  pip.style.top = (16 + Math.floor(count / 3) * 28) + 'px';
+  pip.style.borderColor = settings.accent;
+  if (style) applyPipStyle(pip, style);
+
+  const header = document.createElement('div');
+  header.className = 'pip-header';
+  header.innerHTML = `<input value="${source.label}" spellcheck="false"><span>
+    <button class="btn btn-sm" data-act="main">Main</button>
+    <button class="btn btn-sm btn-danger" data-act="close">×</button>
+  </span>`;
+  const titleInput = header.querySelector('input');
+  titleInput.oninput = () => {
+    source.label = titleInput.value;
+    updateUI();
+    if (source.isMain) mainLabel.textContent = source.label;
+  };
+
+  const vid = document.createElement('video');
+  vid.className = 'pip-video';
+  vid.autoplay = true;
+  vid.playsInline = true;
+  vid.muted = source.muted;
+  vid.volume = source.volume;
+  if (source.type === 'stream') {
+    vid.srcObject = source.stream;
+  } else {
+    vid.src = source.currentUrl || '';
+    vid.loop = !source.playlist && source.loop;
+    vid.play().catch(() => {});
+  }
+  source.videoEl = vid;
+
+  const controls = document.createElement('div');
+  controls.className = 'pip-controls';
+  let extra = '';
+  if (source.type === 'file') {
+    extra = `<button class="btn btn-sm" data-act="loop">${source.loop ? 'Loop' : 'No Loop'}</button>`;
+    if (source.playlist) extra += `<button class="btn btn-sm" data-act="next">Next</button>`;
+  }
+  controls.innerHTML = `
+    <button class="btn btn-sm" data-act="mute">${source.muted ? 'Unmute' : 'Mute'}</button>
+    ${extra}
+    <input type="range" min="0" max="1" step="0.05" value="${source.volume}" style="width:70px" data-act="vol">
+  `;
+
+  const handle = document.createElement('div');
+  handle.className = 'resize-handle';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'hover-overlay';
+  overlay.innerHTML = `
+    <button class="btn btn-sm hover-mute">${source.muted ? 'Unmute' : 'Mute'}</button>
+    <button class="btn btn-sm" data-act="make-main">Make Main</button>
+  `;
+
+  pip.append(header, vid, controls, handle, overlay);
+  stage.appendChild(pip);
+  source.pipEl = pip;
+
+  let dragState = null;
+  function startDrag(e) {
+    if (e.target.closest('button') || e.target.tagName === 'INPUT' || e.target.classList.contains('resize-handle')) return;
+    e.preventDefault();
+    const rect = pip.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    dragState = { offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top, stageLeft: stageRect.left, stageTop: stageRect.top };
+    pip.classList.add('dragging');
+    pip.setPointerCapture(e.pointerId);
+  }
+  function doDrag(e) {
+    if (!dragState) return;
+    let x = e.clientX - dragState.stageLeft - dragState.offsetX;
+    let y = e.clientY - dragState.stageTop - dragState.offsetY;
+    if (settings.snap) { x = Math.round(x / 10) * 10; y = Math.round(y / 10) * 10; }
+    x = Math.max(0, Math.min(x, stage.clientWidth - pip.offsetWidth));
+    y = Math.max(0, Math.min(y, stage.clientHeight - pip.offsetHeight));
+    pip.style.left = x + 'px';
+    pip.style.top = y + 'px';
+  }
+  function endDrag() { dragState = null; pip.classList.remove('dragging'); }
+
+  header.addEventListener('pointerdown', startDrag);
+  header.addEventListener('pointermove', doDrag);
+  header.addEventListener('pointerup', endDrag);
+  header.addEventListener('pointercancel', endDrag);
+
+  vid.addEventListener('pointerdown', startDrag);
+  vid.addEventListener('pointermove', doDrag);
+  vid.addEventListener('pointerup', endDrag);
+  vid.addEventListener('pointercancel', endDrag);
+
+  pip.addEventListener('pointerdown', e => { if (document.body.classList.contains('clean')) startDrag(e); });
+  pip.addEventListener('pointermove', e => { if (document.body.classList.contains('clean')) doDrag(e); });
+  pip.addEventListener('pointerup', endDrag);
+  pip.addEventListener('pointercancel', endDrag);
+
+  let resizeState = null;
+  handle.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    resizeState = { w: pip.offsetWidth, h: pip.offsetHeight, x: e.clientX, y: e.clientY };
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!resizeState) return;
+    pip.style.width = Math.max(160, resizeState.w + (e.clientX - resizeState.x)) + 'px';
+    pip.style.height = Math.max(100, resizeState.h + (e.clientY - resizeState.y)) + 'px';
+  });
+  handle.addEventListener('pointerup', () => resizeState = null);
+
+  controls.querySelector('[data-act="mute"]').onclick = () => setMuted(source.id, !source.muted);
+  const vol = controls.querySelector('[data-act="vol"]');
+  if (vol) vol.oninput = e => { source.volume = +e.target.value; vid.volume = source.volume; if (source.isMain) mainVideo.volume = source.volume; };
+  header.querySelector('[data-act="main"]').onclick = () => setMain(source.id);
+  header.querySelector('[data-act="close"]').onclick = () => removeSource(source.id);
+
+  if (source.type === 'file') {
+    const loopBtn = controls.querySelector('[data-act="loop"]');
+    if (loopBtn) loopBtn.onclick = () => {
+      source.loop = !source.loop;
+      if (!source.playlist) {
+        vid.loop = source.loop;
+        if (source.isMain) mainVideo.loop = source.loop;
+      }
+      loopBtn.textContent = source.loop ? 'Loop' : 'No Loop';
+    };
+    const nextBtn = controls.querySelector('[data-act="next"]');
+    if (nextBtn) nextBtn.onclick = () => advancePlaylist(source);
+    vid.onended = () => {
+      if (source.playlist) {
+        if (source.loop || source.playlist.current < source.playlist.files.length - 1) {
+          advancePlaylist(source);
+        }
+      }
+    };
+  }
+
+  overlay.querySelector('.hover-mute').onclick = e => { e.stopPropagation(); setMuted(source.id, !source.muted); };
+  overlay.querySelector('[data-act="make-main"]').onclick = e => { e.stopPropagation(); setMain(source.id); };
+
+  let clickStart = null;
+  pip.addEventListener('pointerdown', e => { if (document.body.classList.contains('clean')) clickStart = { x: e.clientX, y: e.clientY, t: Date.now() }; });
+  pip.addEventListener('pointerup', e => {
+    if (!document.body.classList.contains('clean') || !clickStart) return;
+    const dx = Math.abs(e.clientX - clickStart.x), dy = Math.abs(e.clientY - clickStart.y);
+    if (dx < 6 && dy < 6 && Date.now() - clickStart.t < 400 && !e.target.closest('button')) setMain(source.id);
+    clickStart = null;
+  });
+
+  function showOverlay() { if (document.body.classList.contains('clean')) { overlay.classList.add('visible'); clearTimeout(hideTimers.get(pip)); } }
+  function scheduleHide() { clearTimeout(hideTimers.get(pip)); hideTimers.set(pip, setTimeout(() => overlay.classList.remove('visible'), settings.hideDelay)); }
+  pip.addEventListener('pointerenter', showOverlay);
+  pip.addEventListener('pointermove', () => { showOverlay(); scheduleHide(); });
+  pip.addEventListener('pointerleave', scheduleHide);
+  pip.addEventListener('pointerdown', () => { document.querySelectorAll('.pip').forEach(p => p.style.zIndex = 5); pip.style.zIndex = 20; });
+}
+
+function advancePlaylist(source) {
+  if (!source.playlist) return;
+  const pl = source.playlist;
+  const nextIndex = (pl.current + 1) % pl.files.length;
+  if (!source.loop && nextIndex === 0 && pl.current === pl.files.length - 1) return;
+  pl.current = nextIndex;
+  const file = pl.files[pl.current];
+  const url = URL.createObjectURL(file);
+  if (source.currentUrl) URL.revokeObjectURL(source.currentUrl);
+  source.currentUrl = url;
+  source.label = pl.name + ' (' + (pl.current + 1) + '/' + pl.files.length + ')';
+  if (source.videoEl) { source.videoEl.src = url; source.videoEl.play().catch(() => {}); }
+  if (source.isMain) { mainVideo.src = url; mainVideo.play().catch(() => {}); mainLabel.textContent = source.label; }
+  updateUI();
+}
+
+function removeSource(id) {
+  const idx = sources.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  const s = sources[idx];
+  if (s.type === 'stream') s.stream.getTracks().forEach(t => t.stop());
+  if (s.currentUrl) URL.revokeObjectURL(s.currentUrl);
+  if (s.pipEl) s.pipEl.remove();
+  sources.splice(idx, 1);
+  if (currentMainId === id) {
+    currentMainId = null;
+    mainVideo.srcObject = null;
+    mainVideo.src = '';
+    mainLabel.textContent = 'No source';
+    if (sources.length) setMain(sources[0].id);
+  }
+  updateUI();
+}
+
+function cycleMain() {
+  if (sources.length < 2) return;
+  const ids = sources.map(s => s.id);
+  const i = ids.indexOf(currentMainId);
+  setMain(ids[(i + 1) % ids.length]);
+}
+
+function arrange() {
+  const pips = [...document.querySelectorAll('.pip')];
+  pips.forEach((pip, i) => {
+    const col = i % 3, row = Math.floor(i / 3);
+    pip.style.left = (12 + col * 30) + 'px';
+    pip.style.top = (12 + row * 30) + 'px';
+    pip.style.width = settings.pipSize + 'px';
+    pip.style.height = Math.round(settings.pipSize * 0.62) + 'px';
+  });
+}
+
+function toggleClean() {
+  document.body.classList.toggle('clean');
+  cleanBtn.textContent = document.body.classList.contains('clean') ? 'Show UI' : 'Clean Fullscreen';
+  if (document.body.classList.contains('clean')) toast('Clean mode — drag, resize, click to make main');
+}
+
+function addStreamSource(stream, label) {
+  if (sources.length >= settings.max) { toast('Max sources'); stream.getTracks().forEach(t => t.stop()); return; }
+  const source = { id: nextId++, type: 'stream', stream, label: label || 'Capture', pipEl: null, videoEl: null, isMain: false, muted: false, volume: 1, loop: false };
+  sources.push(source);
+  stream.getVideoTracks().forEach(t => t.onended = () => removeSource(source.id));
+  if (!currentMainId) setMain(source.id); else makePip(source);
+  updateUI();
+  toast('Capture added');
+}
+
+function addFileSource(file, asPlaylist = false) {
+  if (sources.length >= settings.max) { toast('Max sources'); return; }
+  const url = URL.createObjectURL(file);
+  const source = {
+    id: nextId++,
+    type: 'file',
+    label: file.name,
+    currentUrl: url,
+    loop: true,
+    pipEl: null,
+    videoEl: null,
+    isMain: false,
+    muted: false,
+    volume: 1,
+    playlist: null
+  };
+  sources.push(source);
+  if (!currentMainId) setMain(source.id); else makePip(source);
+  updateUI();
+  toast('Video added');
+}
+
+function addPlaylistSource(pl) {
+  if (sources.length >= settings.max) { toast('Max sources'); return; }
+  pl.current = 0;
+  const file = pl.files[0];
+  const url = URL.createObjectURL(file);
+  const source = {
+    id: nextId++,
+    type: 'file',
+    label: pl.name + ' (1/' + pl.files.length + ')',
+    currentUrl: url,
+    loop: pl.loop,
+    pipEl: null,
+    videoEl: null,
+    isMain: false,
+    muted: false,
+    volume: 1,
+    playlist: pl
+  };
+  sources.push(source);
+  if (!currentMainId) setMain(source.id); else makePip(source);
+  updateUI();
+  toast('Playlist playing');
+}
+
+document.getElementById('addBtn').onclick = () => {
+  if (sources.length >= settings.max) { toast('Max sources'); return; }
+  if (!navigator.mediaDevices?.getDisplayMedia) { toast('Screen capture not available'); return; }
+  document.getElementById('captureModal').style.display = 'grid';
+};
+document.getElementById('cancelCapture').onclick = () => document.getElementById('captureModal').style.display = 'none';
+document.getElementById('confirmCapture').onclick = async () => {
+  document.getElementById('captureModal').style.display = 'none';
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { cursor: 'always' },
+      audio: document.getElementById('optAudio').checked,
+      preferCurrentTab: document.getElementById('optPreferTab').checked,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include'
+    });
+    addStreamSource(stream, 'Capture ' + nextId);
+  } catch (e) {
+    if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Failed: ' + e.message);
+  }
+};
+
+document.getElementById('addVideoBtn').onclick = () => fileInput.click();
+fileInput.onchange = e => {
+  const files = [...e.target.files].filter(f => f.type.startsWith('video/'));
+  if (!files.length) return;
+  if (files.length === 1) {
+    addFileSource(files[0]);
+  } else {
+    const pl = { id: nextId++, name: 'Playlist ' + (playlists.length + 1), files, current: 0, loop: true };
+    playlists.push(pl);
+    toast(files.length + ' videos added as playlist');
+    renderPlaylistList();
+    document.getElementById('playlistModal').style.display = 'grid';
+  }
+  fileInput.value = '';
+};
+
+document.getElementById('playlistBtn').onclick = () => { renderPlaylistList(); document.getElementById('playlistModal').style.display = 'grid'; };
+document.getElementById('closePlaylist').onclick = () => document.getElementById('playlistModal').style.display = 'none';
+
+document.getElementById('settingsBtn').onclick = () => {
+  document.getElementById('setMax').value = settings.max;
+  document.getElementById('setPipSize').value = settings.pipSize;
+  document.getElementById('setSnap').checked = settings.snap;
+  document.getElementById('setAutoMute').checked = settings.autoMute;
+  document.getElementById('setLabels').checked = settings.showLabels;
+  document.getElementById('setAccent').value = settings.accent;
+  document.getElementById('setHideDelay').value = settings.hideDelay;
+  document.getElementById('settingsModal').style.display = 'grid';
+};
+document.getElementById('closeSettings').onclick = () => {
+  settings.max = +document.getElementById('setMax').value;
+  settings.pipSize = +document.getElementById('setPipSize').value;
+  settings.snap = document.getElementById('setSnap').checked;
+  settings.autoMute = document.getElementById('setAutoMute').checked;
+  settings.showLabels = document.getElementById('setLabels').checked;
+  settings.accent = document.getElementById('setAccent').value;
+  settings.hideDelay = +document.getElementById('setHideDelay').value;
+  document.getElementById('settingsModal').style.display = 'none';
+  updateUI();
+  toast('Settings applied');
+};
+
+document.getElementById('cycleBtn').onclick = cycleMain;
+document.getElementById('arrangeBtn').onclick = arrange;
+cleanBtn.onclick = toggleClean;
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.body.classList.contains('clean')) toggleClean();
+    document.getElementById('captureModal').style.display = 'none';
+    document.getElementById('settingsModal').style.display = 'none';
+    document.getElementById('playlistModal').style.display = 'none';
+  }
+  if ((e.key === 'f' || e.key === 'F') && !e.target.matches('input')) toggleClean();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') { e.preventDefault(); document.getElementById('addBtn').click(); }
+});
+
+updateUI();
+</script>
+</body>
+</html>
